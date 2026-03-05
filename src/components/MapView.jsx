@@ -1,132 +1,139 @@
-import React, { useEffect, useRef } from 'react'
-import useKakaoLoader from '../hook/useKakaoLoader'
+import React, { useEffect, useRef, useState } from "react";
+import useKakaoLoader from "../hook/useKakaoLoader";
+
 const MapView = ({ selectedSpot, spots = [] }) => {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const infoRef = useRef(null);
 
-    const mapRef = useRef(null)
-    const mapInstanceRef = useRef(null)
-    const markersRef = useRef([])
-    const infoRef = useRef(null)
+  const { ready } = useKakaoLoader();
+  const [isMapLoaded, setIsMapLoaded] = useState(false);
 
-    const { ready } = useKakaoLoader()
+  useEffect(() => {
+    if (!ready) return;
+    if (mapInstanceRef.current) return;
+    if (!mapRef.current) return;
 
-    useEffect(() => {
-        if (!ready) return
+    window.kakao.maps.load(() => {
+      const center = new window.kakao.maps.LatLng(37.5665, 126.978);
 
-        if (mapInstanceRef.current) return
+      const map = new window.kakao.maps.Map(mapRef.current, {
+        center,
+        level: 5,
+      });
 
-        if (!mapRef.current) return
+      mapInstanceRef.current = map;
 
-        window.kakao.maps.load(() => {
-            const center = new window.kakao.maps.LatLng(37.5665, 126.978)
+      infoRef.current = new window.kakao.maps.InfoWindow({
+        zIndex: 10,
+        removable: true,
+      });
 
-            const map = new window.kakao.maps.Map(mapRef.current, {
-                center,
-                level: 5
-            })
+      setIsMapLoaded(true);
+    });
+  }, [ready]);
 
-            mapInstanceRef.current = map
+  useEffect(() => {
+    if (!isMapLoaded || !mapInstanceRef.current || !window.kakao?.maps) return;
 
-            infoRef.current = new window.kakao.maps.InfoWindow({
-                zIndex: 10,
-                removable: true
-            })
-        })
-    }, [ready])
+    const map = mapInstanceRef.current;
 
-    useEffect(() => {
-        //1. 카카오 SDK 준비 안됐거나
-        //    지도 인스턴스가 없으면 실행 중단
-        if (!ready || !mapInstanceRef.current || !window.kakao?.maps) return
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
 
-        const map = mapInstanceRef.current
-        /* 2.기존 마커 제거
-             * 
-             * spots가 변경될 때마다 새로 그리기 때문에
-             * 기존 마커를 먼저 지워줘야 중복이 안 생김
-         */
-        markersRef.current.forEach((m) => m.setMap(null))
+    if (!spots.length) return;
 
-        // 마커 배열 초기화
-        markersRef.current = []
+    // ✨ 중복 좌표를 걸러내는 로직 추가
+    const uniqueSpots = [];
+    const seenCoords = new Set();
 
-        // 표시할 배열 없으면 종료
-        if (!spots.length) return
+    spots.forEach((spot) => {
+      if (!spot.lat || !spot.lng) return;
 
-        // 3. spots 배열을 돌면서 마커 생성
-        spots.forEach((spot) => {
-            // 위도/경도 없으면 생성하지 않음
-            if (!spot.lat || !spot.lng) return
+      // 위도와 경도를 문자로 합쳐서 고유한 키(key) 생성
+      const coordKey = `${spot.lat}_${spot.lng}`;
 
-            //  카카오 지도용 좌표 객체 생성
-            const position = new window.kakao.maps.LatLng(
-                Number(spot.lat),
-                Number(spot.lng)
-            )
-            // 마커생성
-            const marker = new window.kakao.maps.Marker({
-                position,
-                map
-            })
-            // 마커 객체에 spot 데이터 저장 (선택적)
-            marker.spot = spot
-            //  나중에 제거하기 위해 ref 배열에 저장
-            markersRef.current.push(marker)
+      // 처음 보는 좌표일 때만 배열에 추가!
+      if (!seenCoords.has(coordKey)) {
+        seenCoords.add(coordKey);
+        uniqueSpots.push(spot);
+      }
+    });
 
-            //4. 마커 클릭 이벤트 등록
-            window.kakao.maps.event.addListener(marker, 'click', () => {
-                if (infoRef.current) {
-                    infoRef.current.setContent(
-                        `
-                        <div class="p-2 min-w-[160px]">
+    // 중복이 제거된 uniqueSpots로만 마커 생성
+    uniqueSpots.forEach((spot) => {
+      const position = new window.kakao.maps.LatLng(
+        Number(spot.lat),
+        Number(spot.lng),
+      );
+
+      const marker = new window.kakao.maps.Marker({
+        position,
+        map,
+      });
+
+      marker.spot = spot;
+      markersRef.current.push(marker);
+
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        if (infoRef.current) {
+          infoRef.current.setContent(
+            `
+                        <div class="p-2 min-w-40">
                             <div class="font-semibold text-sm">
                                 ${spot.name}
                             </div>
                             <div class="text-xs text-slate-500 mt-1">
-                                ${spot.detail || '-'}
+                                ${spot.detail || "-"}
                             </div>
                             <div class="text-xs text-slate-500">
-                                ${spot.phone || '-'}
+                                ${spot.phone || "-"}
                             </div>
                         </div>
-                        `
-                    )
-                    infoRef.current.open(map, marker)
-                }
-            })
-        })
-    }, [ready, spots])
-
-    useEffect(() => {
-        if (!ready ||!selectedSpot|| !mapInstanceRef.current || !window.kakao?.maps) return
-
-        const map = mapInstanceRef.current
-
-        const { lat, lng } = selectedSpot
-
-        if (!lat || !lng) return
-
-        const position = new window.kakao.maps.LatLng(Number(lat), Number(lng))
-        map.setCenter(position)
-        map.setLevel(3)
-
-        const marker = markersRef.current.find(
-            (m) => m.spot?.name === selectedSpot.name
-        )
-
-
-        if (marker && infoRef.current) {
-            infoRef.current.setContent(
-                `<div class="p-2 min-w-[160px]">
-                    <div class="font-semibold text-sm">${selectedSpot.name}</div>
-                    <div class="text-xs text-slate-500 mt-1">${selectedSpot.detail || '-'}</div>
-                    <div class="text-xs text-slate-500">${selectedSpot.phone || '-'}</div>
-                </div>`
-            )
-            infoRef.current.open(map,marker)
+                        `,
+          );
+          infoRef.current.open(map, marker);
         }
-    }, [ready,selectedSpot])
+      });
+    });
+  }, [isMapLoaded, spots]);
 
-    return <div ref={mapRef} className='w-full h-full' />
-}
+  useEffect(() => {
+    if (
+      !isMapLoaded ||
+      !selectedSpot ||
+      !mapInstanceRef.current ||
+      !window.kakao?.maps
+    )
+      return;
 
-export default MapView
+    const map = mapInstanceRef.current;
+    const { lat, lng } = selectedSpot;
+
+    if (!lat || !lng) return;
+
+    const position = new window.kakao.maps.LatLng(Number(lat), Number(lng));
+    map.setCenter(position);
+    map.setLevel(3);
+
+    const marker = markersRef.current.find(
+      (m) => m.spot?.name === selectedSpot.name,
+    );
+
+    if (marker && infoRef.current) {
+      infoRef.current.setContent(
+        `<div class="p-2 min-w-40">
+                    <div class="font-semibold text-sm">${selectedSpot.name}</div>
+                    <div class="text-xs text-slate-500 mt-1">${selectedSpot.detail || "-"}</div>
+                    <div class="text-xs text-slate-500">${selectedSpot.phone || "-"}</div>
+                </div>`,
+      );
+      infoRef.current.open(map, marker);
+    }
+  }, [isMapLoaded, selectedSpot]);
+
+  return <div ref={mapRef} className="w-full h-full" />;
+};
+
+export default MapView;
